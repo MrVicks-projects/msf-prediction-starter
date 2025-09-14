@@ -3,7 +3,7 @@ name: Deploy to VM
 on:
   push:
     branches: [ "main" ]
-    # Only redeploy when relevant stuff changes (adjust to your taste)
+      # Only redeploy when relevant stuff changes (adjust to your taste)
     paths:
       - "docker-compose.yml"
       - "app/**"
@@ -11,7 +11,7 @@ on:
       - "pipelines/**"
       - "db/**"
       - ".github/workflows/deploy.yml"
-
+  workflow_dispatch: {}
 jobs:
   deploy:
     runs-on: ubuntu-latest
