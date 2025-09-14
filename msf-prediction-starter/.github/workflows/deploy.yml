@@ -1,0 +1,80 @@
+name: Deploy to VM
+
+on:
+  push:
+    branches: [ "main" ]
+    # Only redeploy when relevant stuff changes (adjust to your taste)
+    paths:
+      - "docker-compose.yml"
+      - "app/**"
+      - "trainer/**"
+      - "pipelines/**"
+      - "db/**"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (for diff-only logic; not strictly required)
+        uses: actions/checkout@v4
+
+      - name: Add VM to known_hosts (optional but recommended)
+        if: secrets.VM_KNOWN_HOSTS != ''
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: SSH & Deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            # Ensure repo exists at the target path
+            REPO_PATH="${{ secrets.VM_REPO_PATH }}"
+            if [ ! -d "$REPO_PATH/.git" ]; then
+              mkdir -p "$REPO_PATH"
+              git clone https://github.com/${{ github.repository }} "$REPO_PATH"
+            fi
+
+            cd "$REPO_PATH"
+            # Reset to the pushed commit/branch
+            git fetch --all --prune
+            git checkout main
+            git reset --hard origin/main
+
+            # Pull compose images if you reference registries (optional)
+            # docker compose pull || true
+
+            # Bring up core infra (idempotent)
+            docker compose --profile core up -d
+
+            # Rebuild ML and API images only if their dirs changed in this push
+            CHANGED="$(git diff --name-only HEAD~1 HEAD || true)"
+
+            if echo "$CHANGED" | grep -q '^trainer/'; then
+              echo "Rebuilding trainer..."
+              docker compose build trainer
+              docker compose up -d trainer
+            fi
+
+            if echo "$CHANGED" | grep -q '^app/'; then
+              echo "Rebuilding API..."
+              docker compose build api
+              docker compose up -d api
+            fi
+
+            # Safety: if first deploy (no containers yet), just ensure up
+            docker compose --profile ml up -d
+            docker compose --profile api up -d
+
+            # Light cleanup
+            docker image prune -f || true
