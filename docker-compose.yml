@@ -1,0 +1,37 @@
+# Compose v2+ (no version key). Stack name set via `name:` below.
+name: msf-core
+
+services:
+  redis:
+    image: redis:7
+    container_name: msf-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+  # Temporary API so you can hit :8080 right now
+  api:
+    container_name: msf-api
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    env_file: [.env]
+    volumes:
+      - ./app:/app:rw
+    depends_on:
+      redis:
+        condition: service_started
+    ports:
+      - "${APP_PORT:-8080}:8000"
+    healthcheck:
+      # Make sure your API exposes /health (200 OK)
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes: 
+  redisdata:
